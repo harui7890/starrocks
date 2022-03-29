@@ -689,6 +689,11 @@ CONF_mInt64(experimental_s3_min_upload_part_size, "16777216");
 
 CONF_Int64(max_load_dop, "16");
 
+#ifdef USE_STAROS
+CONF_String(starmgr_addr, "");
+CONF_Int32(starlet_port, "12345");
+#endif
+
 } // namespace config
 
 } // namespace starrocks
