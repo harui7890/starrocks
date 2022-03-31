@@ -16,8 +16,8 @@
 # specific language governing permissions and limitations
 # under the License.
 
-set -eo pipefail
-
+#set -eo pipefail
+set -x
 ROOT=`dirname "$0"`
 ROOT=`cd "$ROOT"; pwd`
 
@@ -112,11 +112,11 @@ fi
 
 cd ${CMAKE_BUILD_DIR}
 
-${CMAKE_CMD} ../ -DSTARROCKS_THIRDPARTY=${STARROCKS_THIRDPARTY} -DSTARROCKS_HOME=${STARROCKS_HOME} -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
-    -DMAKE_TEST=ON -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE} -DUSE_AVX2=$USE_AVX2 -DUSE_SSE4_2=$USE_SSE4_2 \
-    -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DWITH_BENCH=${WITH_BENCH}
+#${CMAKE_CMD} ../ -DSTARROCKS_THIRDPARTY=${STARROCKS_THIRDPARTY} -DSTARROCKS_HOME=${STARROCKS_HOME} -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+#    -DMAKE_TEST=ON -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE} -DUSE_AVX2=$USE_AVX2 -DUSE_SSE4_2=$USE_SSE4_2 \
+#    -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DWITH_BENCH=${WITH_BENCH}
 
-time make -j${PARALLEL}
+#time make -j${PARALLEL}
 
 if [ ${RUN} -ne 1 ]; then
     echo "Finished"
@@ -199,17 +199,18 @@ test_files=`find ${STARROCKS_TEST_BINARY_DIR} -type f -perm -111 -name "*test" |
 
 # run cases in starrocks_test in parallel if has gtest-parallel script.
 # reference: https://github.com/google/gtest-parallel
-if [ -x ${GTEST_PARALLEL} ]; then
-    ${GTEST_PARALLEL} ${STARROCKS_TEST_BINARY_DIR}/starrocks_test --gtest_filter=${TEST_FILTER} --serialize_test_cases ${GTEST_PARALLEL_OPTIONS}
-else
-    ${STARROCKS_TEST_BINARY_DIR}/starrocks_test --gtest_filter=${TEST_FILTER}
-fi
+#if [ -x ${GTEST_PARALLEL} ]; then
+#    ${GTEST_PARALLEL} ${STARROCKS_TEST_BINARY_DIR}/starrocks_test --gtest_filter=${TEST_FILTER} --serialize_test_cases ${GTEST_PARALLEL_OPTIONS}
+#else
+#    ${STARROCKS_TEST_BINARY_DIR}/starrocks_test --gtest_filter=${TEST_FILTER}
+#fi
+/home/disk1/doris-deps/toolchain/installed/gdb-9.2/bin/gdb  ${STARROCKS_TEST_BINARY_DIR}/starrocks_test
 
-for test in ${test_files[@]}
-do
-    file_name=${test##*/}
-    if [ -z $RUN_FILE ] || [ $file_name == $RUN_FILE ]; then
-        echo "=== Run $file_name ==="
-        $test --gtest_filter=${TEST_FILTER}
-    fi
-done
+#for test in ${test_files[@]}
+#do
+#    file_name=${test##*/}
+#    if [ -z $RUN_FILE ] || [ $file_name == $RUN_FILE ]; then
+#        echo "=== Run $file_name ==="
+#        $test --gtest_filter=${TEST_FILTER}
+#    fi
+#done

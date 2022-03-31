@@ -98,6 +98,8 @@ public:
 
     static Status traverse_headers(KVStore* meta, std::function<bool(long, long, const std::string&)> const& func);
 
+    static Status traverse_for_tablet(KVStore* meta, std::function<bool(long, long, const std::string&)> const& func,int64_t tabletid);
+
     static Status load_json_meta(DataDir* store, const std::string& meta_path);
 
     static Status get_json_meta(DataDir* store, TTabletId tablet_id, std::string* json_meta);
