@@ -17,6 +17,8 @@
 
 cmake_minimum_required(VERSION 3.5.1)
 
+cmake_policy(SET CMP0074 NEW)
+
 # set CMAKE_C_COMPILER, this must set before project command
 if (DEFINED ENV{CC} AND DEFINED ENV{CXX})
     set(CMAKE_C_COMPILER "$ENV{CC}")
@@ -70,6 +72,8 @@ endif()
 message(STATUS "make test: ${MAKE_TEST}")
 
 option(WITH_GCOV "Build binary with gcov to get code coverage" OFF)
+
+option(USE_STAROS "Use StarOS to manager tablet info" OFF)
 
 # Check gcc
 if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
@@ -304,6 +308,41 @@ set_target_properties(opentelemetry_resources PROPERTIES IMPORTED_LOCATION ${THI
 add_library(opentelemetry_exporter_jaeger_trace STATIC IMPORTED GLOBAL)
 set_target_properties(opentelemetry_exporter_jaeger_trace PROPERTIES IMPORTED_LOCATION ${THIRDPARTY_DIR}/lib64/libopentelemetry_exporter_jaeger_trace.a)
 
+if ("${USE_STAROS}" STREQUAL "ON")
+    set(Protobuf_ROOT $ENV{MY_INSTALL_DIR})
+    set(absl_ROOT $ENV{MY_INSTALL_DIR})
+    set(OPENSSL_ROOT_DIR $ENV{STARROCKS_THIRD_PARTY})
+    set(gRPC_ROOT $ENV{MY_INSTALL_DIR})
+
+    find_package(OpenSSL REQUIRED)
+
+    find_package(Protobuf CONFIG REQUIRED)
+    message(STATUS "Using Protobuf ${Protobuf_VERSION}")
+    include_directories(${Protobuf_INCLUDE_DIRS})
+
+    find_package(gRPC CONFIG REQUIRED)
+    message(STATUS "Using gRPC ${gRPC_VERSION}")
+    include_directories(${gRPC_INCLUDE_DIRS})
+
+    add_library(starlet STATIC IMPORTED)
+    set_target_properties(starlet PROPERTIES IMPORTED_LOCATION $ENV{MY_INSTALL_DIR}/lib64/libstarlet.a)
+    set(STARROCKS_DEPENDENCIES
+        ${STARROCKS_DEPENDENCIES}
+        starlet
+        gRPC::grpc++_reflection
+        gRPC::grpc++
+    )
+endif()
+
+set(AWSSDK_COMMON_RUNTIME_LIBS "aws-crt-cpp;aws-c-auth;aws-c-cal;aws-c-common;aws-c-compression;aws-c-event-stream;aws-c-http;aws-c-io;aws-c-mqtt;aws-c-s3;aws-checksums;s2n")
+foreach(lib IN ITEMS ${AWSSDK_COMMON_RUNTIME_LIBS})
+    list(APPEND CMAKE_PREFIX_PATH ${THIRDPARTY_DIR}/lib/${lib}/cmake)
+    list(APPEND CMAKE_PREFIX_PATH ${THIRDPARTY_DIR}/lib64/${lib}/cmake)
+endforeach()
+find_package(AWSSDK REQUIRED COMPONENTS core s3 s3-crt transfer)
+include_directories(${AWSSDK_INCLUDE_DIRS})
+set(AWS_S3_LIB aws-cpp-sdk-core aws-cpp-sdk-s3)
+
 # Check if functions are supported in this platform. All flags will generated
 # in gensrc/build/common/env_config.h.
 # You can check funcion here which depends on platform. Don't forget add this
@@ -334,6 +373,9 @@ set(CXX_COMMON_FLAGS "${CXX_COMMON_FLAGS} -Wno-deprecated -Wno-vla -Wno-comment"
 set(CXX_COMMON_FLAGS "${CXX_COMMON_FLAGS} -DBOOST_DATE_TIME_POSIX_TIME_STD_CONFIG")
 set(CXX_COMMON_FLAGS "${CXX_COMMON_FLAGS} -DBOOST_SYSTEM_NO_DEPRECATED -DBOOST_UUID_RANDOM_PROVIDER_FORCE_POSIX")
 set(CXX_COMMON_FLAGS "${CXX_COMMON_FLAGS} -Werror=return-type -Werror=switch")
+if (${USE_STAROS} STREQUAL "ON")
+    set(CXX_COMMON_FLAGS "${CXX_COMMON_FLAGS} -DUSE_STAROS")
+endif()
 
 # When LLVM is used, should give GCC_HOME to get c++11 header to use new string and list
 if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
@@ -549,7 +591,7 @@ set(STARROCKS_DEPENDENCIES
     velocypack
     opentelemetry_trace
     http_client_curl
-    opentelemetry_resources	
+    opentelemetry_resources
     opentelemetry_common
     opentelemetry_exporter_jaeger_trace
     ${WL_END_GROUP}
