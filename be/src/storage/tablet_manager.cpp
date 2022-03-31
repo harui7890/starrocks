@@ -37,6 +37,7 @@ DIAGNOSTIC_POP
 #include "runtime/current_thread.h"
 #include "storage/compaction_manager.h"
 #include "storage/data_dir.h"
+#include "storage/object_metastore.h"
 #include "storage/olap_common.h"
 #include "storage/rowset/rowset_factory.h"
 #include "storage/rowset/rowset_writer.h"
@@ -65,11 +66,13 @@ static void get_shutdown_tablets(std::ostream& os, void*) {
 
 bvar::PassiveStatus<std::string> g_shutdown_tablets("starrocks_shutdown_tablets", get_shutdown_tablets, nullptr);
 
-TabletManager::TabletManager(MemTracker* mem_tracker, int32_t tablet_map_lock_shard_size)
+TabletManager::TabletManager(MemTracker* mem_tracker, int32_t tablet_map_lock_shard_size,StorageEngine * storage_engine)
         : _mem_tracker(mem_tracker),
           _tablets_shards(tablet_map_lock_shard_size),
           _tablets_shards_mask(tablet_map_lock_shard_size - 1),
-          _last_update_stat_ms(0) {
+          _last_update_stat_ms(0),
+          _storage_engine(storage_engine){
+    _meta_path = "oss://zhuming-test/";
     CHECK_GT(_tablets_shards.size(), 0) << "tablets shard count greater than 0";
     CHECK_EQ(_tablets_shards.size() & _tablets_shards_mask, 0) << "tablets shard count must be power of two";
 }
@@ -421,9 +424,102 @@ Status TabletManager::drop_tablets_on_error_root_path(const std::vector<TabletIn
     return Status::OK();
 }
 
+StatusOr<TabletSharedPtr> TabletManager::_load_tablet(TTabletId tablet_id) {
+    DataDir * default_dir = nullptr;
+
+    auto metastore = new_object_metastore(fmt::format("{}{}",_meta_path,tablet_id));
+    if(_storage_engine->get_stores().size()==0){
+        return Status::InternalError("no available dir");
+    }
+
+    default_dir = _storage_engine->get_stores()[0];
+    auto st = metastore->get_tablet_meta(tablet_id,0);
+    if(!st.ok()){
+        return Status::InternalError("failed to load tablet meta");
+    }
+    TabletSharedPtr  tablet = Tablet::create_tablet_from_meta(_mem_tracker,st.value(),default_dir);
+    if(tablet == nullptr){
+        return Status::InternalError("failed to create tablet");
+    }
+
+    auto init_st = tablet->init();
+    if(!init_st.ok()){
+        return Status::InternalError("failed to init tablet");
+    }
+
+    TabletUid tablet_uid =  tablet->tablet_uid();
+
+    auto dir_rowset_metas = metastore->get_rowset_metas(tablet_uid);
+    if(!dir_rowset_metas.ok()){
+        return Status::InternalError("failed to load ");
+    }
+
+    for (const auto& rowset_meta : dir_rowset_metas.value()) {
+        RowsetSharedPtr rowset;
+        Status create_status = RowsetFactory::create_rowset(&tablet->tablet_schema(), tablet->schema_hash_path(),
+                                                            rowset_meta, &rowset);
+        if (!create_status.ok()) {
+            LOG(WARNING) << "Fail to create rowset from rowsetmeta,"
+                         << " rowset=" << rowset_meta->rowset_id() << " type=" << rowset_meta->rowset_type()
+                         << " state=" << rowset_meta->rowset_state();
+            continue;
+        }
+        if (rowset_meta->rowset_state() == RowsetStatePB::COMMITTED &&
+            rowset_meta->tablet_uid() == tablet->tablet_uid()) {
+            Status commit_txn_status = _storage_engine->txn_manager()->commit_txn(
+                    default_dir->get_meta(), rowset_meta->partition_id(), rowset_meta->txn_id(), rowset_meta->tablet_id(),
+                    rowset_meta->tablet_schema_hash(), rowset_meta->tablet_uid(), rowset_meta->load_id(), rowset, true);
+            if (!commit_txn_status.ok() && !commit_txn_status.is_already_exist()) {
+                LOG(WARNING) << "Fail to add committed rowset=" << rowset_meta->rowset_id()
+                             << " tablet=" << rowset_meta->tablet_id() << " txn=" << rowset_meta->txn_id();
+            } else {
+                LOG(INFO) << "Added committed rowset=" << rowset_meta->rowset_id()
+                          << " tablet=" << rowset_meta->tablet_id()
+                          << " schema hash=" << rowset_meta->tablet_schema_hash() << " txn=" << rowset_meta->txn_id();
+            }
+        } else if (rowset_meta->rowset_state() == RowsetStatePB::VISIBLE &&
+                   rowset_meta->tablet_uid() == tablet->tablet_uid()) {
+            Status publish_status = tablet->add_rowset(rowset, false);
+            if (!publish_status.ok() && !publish_status.is_already_exist()) {
+                LOG(WARNING) << "Fail to add visible rowset=" << rowset->rowset_id()
+                             << " to tablet=" << rowset_meta->tablet_id() << " txn id=" << rowset_meta->txn_id()
+                             << " start version=" << rowset_meta->version().first
+                             << " end version=" << rowset_meta->version().second;
+            }
+        } else {
+            LOG(WARNING) << "Found invalid rowset=" << rowset_meta->rowset_id()
+                         << " tablet id=" << rowset_meta->tablet_id() << " tablet uid=" << rowset_meta->tablet_uid()
+                         << " schema hash=" << rowset_meta->tablet_schema_hash() << " txn=" << rowset_meta->txn_id()
+                         << " current valid tablet uid=" << tablet->tablet_uid();
+        }
+    }
+    return tablet;
+}
+
 TabletSharedPtr TabletManager::get_tablet(TTabletId tablet_id, bool include_deleted, std::string* err) {
-    std::shared_lock rlock(_get_tablets_shard_lock(tablet_id));
-    return _get_tablet_unlocked(tablet_id, include_deleted, err);
+    {
+        std::shared_lock rlock(_get_tablets_shard_lock(tablet_id));
+        auto tablet = _get_tablet_unlocked(tablet_id, include_deleted, err);
+        if(tablet!= nullptr){
+            return tablet;
+        }
+    }
+#ifdef STARROCKS_WITH_STAROS
+    auto st = _load_tablet(tablet_id);
+    if(!st.ok()){
+       return nullptr;
+    }
+    {
+        std::unique_lock wlock(_get_tablets_shard_lock(tablet_id));
+        auto res = _add_tablet_unlocked(st.value(),false,true);
+        if(!res.ok()){
+            return nullptr;
+        }
+    }
+    return st.value();
+#else
+    return nullptr;
+#endif
 }
 
 TabletSharedPtr TabletManager::_get_tablet_unlocked(TTabletId tablet_id, bool include_deleted, std::string* err) {
@@ -1341,7 +1437,12 @@ Status TabletManager::_remove_tablet_meta(const TabletSharedPtr& tablet) {
     if (tablet->keys_type() == KeysType::PRIMARY_KEYS) {
         return tablet->updates()->clear_meta();
     } else {
+#ifdef STARROCKS_WITH_STAROS
+        auto metastore = new_object_metastore(tablet->schema_hash_path());
+        return metastore->remove_tablet_meta(tablet->tablet_id(), tablet->schema_hash());
+#else
         return TabletMetaManager::remove(tablet->data_dir(), tablet->tablet_id(), tablet->schema_hash());
+#endif
     }
 }
 

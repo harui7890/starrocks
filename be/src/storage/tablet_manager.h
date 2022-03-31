@@ -53,12 +53,13 @@ enum TabletDropFlag {
     kKeepMetaAndFiles = 2,
 };
 
+class StorageEngine;
 // TabletManager provides get, add, delete tablet method for storage engine
 // NOTE: If you want to add a method that needs to hold meta-lock before you can call it,
 // please uniformly name the method in "xxx_unlocked()" mode
 class TabletManager {
 public:
-    explicit TabletManager(MemTracker* mem_tracker, int32_t tablet_map_lock_shard_size);
+    explicit TabletManager(MemTracker* mem_tracker, int32_t tablet_map_lock_shard_size,StorageEngine * storage_engine);
     ~TabletManager() = default;
 
     // The param stores holds all candidate data_dirs for this tablet.
@@ -199,6 +200,7 @@ private:
     TabletSharedPtr _create_tablet_meta_and_dir_unlocked(const TCreateTabletReq& request, bool is_schema_change,
                                                          const Tablet* base_tablet,
                                                          const std::vector<DataDir*>& data_dirs);
+    StatusOr<TabletSharedPtr > _load_tablet(TTabletId tablet_id);
     Status _create_tablet_meta_unlocked(const TCreateTabletReq& request, DataDir* store, bool is_schema_change_tablet,
                                         const Tablet* base_tablet, TabletMetaSharedPtr* tablet_meta);
 
@@ -238,6 +240,8 @@ private:
     std::map<int64_t, TTabletStat> _tablet_stat_cache;
     // last update time of tablet stat cache
     int64_t _last_update_stat_ms;
+    std::string _meta_path;
+    StorageEngine * _storage_engine;
 };
 
 inline bool TabletManager::LockTable::is_locked(int64_t tablet_id) {
