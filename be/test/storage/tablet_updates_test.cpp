@@ -177,7 +177,9 @@ public:
         request.tablet_schema.columns.push_back(k3);
         auto st = StorageEngine::instance()->create_tablet(request);
         CHECK(st.ok()) << st.to_string();
-        return StorageEngine::instance()->tablet_manager()->get_tablet(tablet_id, false);
+        StatusOr<TabletSharedPtr> res = StorageEngine::instance()->tablet_manager()->get_tablet(tablet_id, false);
+        CHECK(res.ok())<<res.status();
+        return res.value();
     }
 
     TabletSharedPtr create_tablet2(int64_t tablet_id, int32_t schema_hash) {
@@ -216,7 +218,9 @@ public:
         request.tablet_schema.columns.push_back(k4);
         auto st = StorageEngine::instance()->create_tablet(request);
         CHECK(st.ok()) << st.to_string();
-        return StorageEngine::instance()->tablet_manager()->get_tablet(tablet_id, false);
+        auto res = StorageEngine::instance()->tablet_manager()->get_tablet(tablet_id, false);
+        CHECK(res.ok())<< res.status();
+        return res.value();
     }
 
     TabletSharedPtr create_tablet_to_schema_change(int64_t tablet_id, int32_t schema_hash) {
@@ -255,7 +259,9 @@ public:
         request.tablet_schema.columns.push_back(k4);
         auto st = StorageEngine::instance()->create_tablet(request);
         CHECK(st.ok()) << st.to_string();
-        return StorageEngine::instance()->tablet_manager()->get_tablet(tablet_id, false);
+        auto res = StorageEngine::instance()->tablet_manager()->get_tablet(tablet_id, false);
+        CHECK(res.ok())<<res.status();
+        return res.value();
     }
 
     void SetUp() override {
@@ -361,7 +367,9 @@ public:
         auto st = tablet_manager->create_tablet_from_meta_snapshot(store, new_tablet_id, new_schema_hash,
                                                                    new_tablet_path);
         CHECK(st.ok()) << st;
-        return tablet_manager->get_tablet(new_tablet_id, false);
+        auto res = tablet_manager->get_tablet(new_tablet_id, false);
+        CHECK(res.ok());
+        return res.value();
     }
 
     void test_writeread(bool enable_persistent_index);
