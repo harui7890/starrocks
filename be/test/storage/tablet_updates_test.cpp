@@ -178,7 +178,7 @@ public:
         auto st = StorageEngine::instance()->create_tablet(request);
         CHECK(st.ok()) << st.to_string();
         StatusOr<TabletSharedPtr> res = StorageEngine::instance()->tablet_manager()->get_tablet(tablet_id, false);
-        CHECK(res.ok())<<res.status();
+        CHECK(res.ok()) << res.status();
         return res.value();
     }
 
@@ -219,7 +219,7 @@ public:
         auto st = StorageEngine::instance()->create_tablet(request);
         CHECK(st.ok()) << st.to_string();
         auto res = StorageEngine::instance()->tablet_manager()->get_tablet(tablet_id, false);
-        CHECK(res.ok())<< res.status();
+        CHECK(res.ok()) << res.status();
         return res.value();
     }
 
@@ -260,7 +260,7 @@ public:
         auto st = StorageEngine::instance()->create_tablet(request);
         CHECK(st.ok()) << st.to_string();
         auto res = StorageEngine::instance()->tablet_manager()->get_tablet(tablet_id, false);
-        CHECK(res.ok())<<res.status();
+        CHECK(res.ok()) << res.status();
         return res.value();
     }
 
