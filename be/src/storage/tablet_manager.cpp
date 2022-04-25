@@ -77,15 +77,17 @@ TabletManager::TabletManager(MemTracker* mem_tracker, int32_t tablet_map_lock_sh
 
 Status TabletManager::_add_tablet_unlocked(const TabletSharedPtr& new_tablet, bool update_meta, bool force,
                                            bool need_load) {
-    auto st = _get_tablet_unlocked(new_tablet->tablet_id(), need_load);
-    if (!st.ok()) {
+    auto res = _get_tablet_unlocked(new_tablet->tablet_id(), need_load);
+    if (res.status().is_not_found()) {
         RETURN_IF_ERROR(_update_tablet_map_and_partition_info(new_tablet));
+    } else if (!res.ok()) {
+        return res.status();
     } else if (force) {
-        auto old_tablet = st.value();
+        auto old_tablet = res.value();
         RETURN_IF_ERROR(_drop_tablet_unlocked(old_tablet->tablet_id(), kKeepMetaAndFiles));
         RETURN_IF_ERROR(_update_tablet_map_and_partition_info(new_tablet));
     } else {
-        TabletSharedPtr old_tablet = st.value();
+        TabletSharedPtr old_tablet = res.value();
         if (old_tablet->schema_hash_path() == new_tablet->schema_hash_path()) {
             LOG(WARNING) << "add the same tablet twice! tablet_id=" << new_tablet->tablet_id()
                          << " schema_hash_path=" << new_tablet->schema_hash_path();
@@ -144,10 +146,12 @@ Status TabletManager::create_tablet(const TCreateTabletReq& request, std::vector
     LOG(INFO) << "Creating tablet " << tablet_id;
 
     std::unique_lock wlock(_get_tablets_shard_lock(tablet_id));
-    auto st = _get_tablet_unlocked(tablet_id, true);
+    auto res = _get_tablet_unlocked(tablet_id, true);
     TabletSharedPtr tablet = nullptr;
-    if (st.ok()) {
-        tablet = st.value();
+    if (res.ok()) {
+        tablet = res.value();
+    } else if (!res.status().is_not_found()) {
+        return res.status();
     }
     if (tablet != nullptr && tablet->tablet_state() != TABLET_SHUTDOWN) {
         return Status::OK();
@@ -339,7 +343,7 @@ Status TabletManager::_drop_tablet_unlocked(TTabletId tablet_id, TabletDropFlag 
     auto result = _get_tablet_unlocked(tablet_id, true);
     if (!result.ok()) {
         LOG(WARNING) << "Fail to drop tablet " << tablet_id << ": not exist";
-        return to_status(result);
+        return result.status();
     }
     TabletSharedPtr tablet_to_drop = result.value();
     LOG(INFO) << "Dropping tablet " << tablet_id;
@@ -355,11 +359,13 @@ Status TabletManager::_drop_tablet_unlocked(TTabletId tablet_id, TabletDropFlag 
     TTabletId related_tablet_id = alter_task->related_tablet_id();
 
     result = _get_tablet_unlocked(related_tablet_id, true);
-    if (!result.ok()) {
+    if (result.status().is_not_found()) {
         // TODO(lingbin): in what case, can this happen?
         LOG(WARNING) << "Dropping tablet directly when related tablet not found. "
                      << " tablet_id=" << related_tablet_id;
         return _drop_tablet_directly_unlocked(tablet_id, flag);
+    } else if (!result.ok()) {
+        return result.status();
     }
     TabletSharedPtr related_tablet = result.value();
 
@@ -439,10 +445,10 @@ Status TabletManager::drop_tablets_on_error_root_path(const std::vector<TabletIn
 }
 
 StatusOr<TabletSharedPtr> TabletManager::_load_tablet(TTabletId tablet_id) {
-    TabletSharedPtr tablet = nullptr;
-    if (_storage_engine == nullptr) {
-        return Status::NotFound("no data dir");
+    if (!config::enable_tablet_load || _storage_engine == nullptr) {
+        return Status::InternalError("tablet load failed");
     }
+    TabletSharedPtr tablet = nullptr;
 
     for (auto data_dir : _storage_engine->get_stores()) {
         auto st = data_dir->load_tablet(tablet_id);
@@ -464,27 +470,20 @@ StatusOr<TabletSharedPtr> TabletManager::get_tablet(TTabletId tablet_id, bool in
     TabletSharedPtr tablet = nullptr;
     {
         std::shared_lock rlock(shard->lock);
-        auto tablet = shard->tablet_cache->get(tablet_id);
-        if (tablet) {
-            return tablet;
-        }
+        tablet = shard->tablet_cache->get(tablet_id);
     }
-    if (include_deleted) {
+    if (tablet == nullptr && include_deleted) {
         std::shared_lock rlock(_shutdown_tablets_lock);
         if (auto it = _shutdown_tablets.find(tablet_id); it != _shutdown_tablets.end()) {
             tablet = it->second.tablet;
         }
-        if (tablet) {
-            return tablet;
-        }
     }
-    {
+    if (tablet == nullptr) {
         ASSIGN_OR_RETURN(tablet, _load_tablet(tablet_id));
         std::unique_lock wlock(shard->lock);
         shard->id_set.insert(tablet_id);
         shard->tablet_cache->put(tablet);
     }
-
     if (!tablet->is_used()) {
         LOG(WARNING) << "tablet_id=" << tablet_id << " cannot be used";
         if (err != nullptr) {
@@ -940,7 +939,7 @@ Status TabletManager::load_tablet_from_dir(DataDir* store, TTabletId tablet_id, 
     tablet_meta->serialize(&meta_binary);
     auto st = load_tablet_from_meta(store, tablet_id, schema_hash, meta_binary, true, force, restore, true);
     LOG_IF(WARNING, !st.ok()) << "fail to load tablet. meta_path=" << meta_path;
-    return to_status(st);
+    return st.status();
 }
 
 Status TabletManager::report_tablet_info(TTabletInfo* tablet_info) {
@@ -950,7 +949,7 @@ Status TabletManager::report_tablet_info(TTabletInfo* tablet_info) {
     if (!res.ok()) {
         LOG(WARNING) << "Fail to report tablet info: can't find tablet."
                      << " tablet=" << tablet_info->tablet_id;
-        return to_status(res);
+        return res.status();
     }
     auto tablet = res.value();
     LOG(INFO) << "Reporting tablet info. tablet_id=" << tablet_info->tablet_id;
@@ -1034,6 +1033,7 @@ Status TabletManager::start_trash_sweep() {
                     std::shared_lock rlock(tablets_shard->lock);
                     tablet_ptr = tablets_shard->tablet_cache->get(tabletid);
                     if (!tablet_ptr) {
+                        rlock.unlock();
                         auto st = _load_tablet(tabletid);
                         if (!st.ok()) {
                             continue;
@@ -1276,8 +1276,10 @@ void TabletManager::do_tablet_meta_checkpoint(DataDir* data_dir) {
         for (auto tabletid : shard_id_set) {
             TabletSharedPtr tablet_ptr = nullptr;
             {
+                std::shared_lock rlock(tablets_shard->lock);
                 tablet_ptr = tablets_shard->tablet_cache->get(tabletid);
                 if (!tablet_ptr) {
+                    rlock.unlock();
                     auto st = _load_tablet(tabletid);
                     if (!st.ok()) {
                         continue;
@@ -1318,6 +1320,7 @@ void TabletManager::_build_tablet_stat() {
                 std::shared_lock rlock(tablets_shard->lock);
                 tablet = tablets_shard->tablet_cache->get(tablet_id);
                 if (!tablet) {
+                    rlock.unlock();
                     auto st = _load_tablet(tablet_id);
                     if (!st.ok()) {
                         continue;
@@ -1626,9 +1629,9 @@ Status TabletManager::create_tablet_from_meta_snapshot(DataDir* store, TTabletId
 
     std::unique_lock l(_get_tablets_shard_lock(tablet_id));
     // TODO: if old tablet exists, should do an atomic "replace_or_add" approach instead
-    auto st = _get_tablet_unlocked(tablet_id, true, nullptr);
-    if (st.ok()) {
-        auto old_tablet_ptr = st.value();
+    auto result = _get_tablet_unlocked(tablet_id, true, nullptr);
+    if (result.ok()) {
+        auto old_tablet_ptr = result.value();
         if (old_tablet_ptr->tablet_state() == TabletState::TABLET_SHUTDOWN) {
             Status st = delete_shutdown_tablet(tablet_id);
             if (st.ok() || st.is_not_found()) {
@@ -1641,6 +1644,8 @@ Status TabletManager::create_tablet_from_meta_snapshot(DataDir* store, TTabletId
         } else {
             return Status::InternalError("tablet already exist");
         }
+    } else if (!result.status().is_not_found()) {
+        return result.status();
     }
 
     RETURN_IF_ERROR(meta_store->write_batch(&wb));
@@ -1657,7 +1662,7 @@ Status TabletManager::create_tablet_from_meta_snapshot(DataDir* store, TTabletId
         return Status::InternalError("tablet init failed");
     }
     auto res = _add_tablet_unlocked(tablet, true, false, false);
-    LOG_IF(WARNING, !st.ok()) << "Fail to add cloned tablet " << tablet_id << ": " << res;
+    LOG_IF(WARNING, !res.ok()) << "Fail to add cloned tablet " << tablet_id << ": " << res;
     return res;
 }
 
