@@ -271,6 +271,8 @@ public:
         return _tablet_meta->set_enable_persistent_index(enable_persistent_index);
     }
 
+    bool can_be_evicted();
+
 protected:
     void on_shutdown() override;
 

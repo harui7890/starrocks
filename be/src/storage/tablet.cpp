@@ -1113,6 +1113,10 @@ void Tablet::generate_tablet_meta_copy(const TabletMetaSharedPtr& new_tablet_met
     new_tablet_meta->init_from_pb(&tablet_meta_pb);
 }
 
+bool Tablet::can_be_evicted() {
+    bool result = false;
+    return true;
+}
 // this is a unlocked version of generate_tablet_meta_copy()
 // some method already hold the _meta_lock before calling this,
 // such as EngineCloneTask::_finish_clone -> tablet->revise_tablet_meta

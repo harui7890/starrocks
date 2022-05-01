@@ -2,14 +2,17 @@
 
 #pragma once
 
-#include "common/s3_uri.h"
-#include "common/statusor.h"
-#include "env/env.h"
-#include "env/env_s3.h"
-#include "storage/tablet.h"
-#include "util/lru_cache.h"
+
+#include <memory>
+#include <list>
+#include <unordered_map>
+#include <thread>
+#include <mutex>
 
 namespace starrocks {
+class Tablet;
+using TabletSharedPtr = std::shared_ptr<Tablet>;
+
 
 class TabletMetaCache {
 public:
@@ -19,16 +22,23 @@ public:
     virtual ~TabletMetaCache() = default;
 };
 
-class FullTabletMetaCache : public TabletMetaCache {
-    using TabletMap = std::unordered_map<int64_t, TabletSharedPtr>;
-
+class LRUTabletMetaCache : public TabletMetaCache {
 public:
-    TabletSharedPtr get(int64_t tablet_id) override;
-    bool put(const TabletSharedPtr& tabletptr) override;
-    bool remove(int64_t tablet_id) override;
+    TabletSharedPtr get(int64_t tablet_id);
+    bool put(const TabletSharedPtr& tabletptr);
+    bool remove(int64_t tablet_id);
+    LRUTabletMetaCache(int capacity);
+    virtual ~LRUTabletMetaCache();
 
 private:
-    TabletMap tabletmap;
+    void prune_cache();
+    std::thread _prune_thread;
+    std::mutex _mutex;
+    int _capacity;
+    int _used;
+    bool _is_stopped;
+    std::list<TabletSharedPtr> _lru_list;
+    std::unordered_map<int64_t,std::list<TabletSharedPtr>::iterator> _tabletmap;
 };
 
 } // namespace starrocks

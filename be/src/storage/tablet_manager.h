@@ -157,7 +157,7 @@ private:
     using TabletSet = std::unordered_set<int64_t>;
 
     struct TabletsShard {
-        TabletsShard() { tablet_cache = std::make_shared<FullTabletMetaCache>(); }
+        TabletsShard() { tablet_cache = std::make_shared<LRUTabletMetaCache>(config::tablet_meta_cache_capacity);}
         mutable std::shared_mutex lock;
         TabletSet id_set;
         std::shared_ptr<TabletMetaCache> tablet_cache;
@@ -208,7 +208,7 @@ private:
     TabletSharedPtr _create_tablet_meta_and_dir_unlocked(const TCreateTabletReq& request, bool is_schema_change,
                                                          const Tablet* base_tablet,
                                                          const std::vector<DataDir*>& data_dirs);
-    StatusOr<TabletSharedPtr> _load_tablet(TTabletId tablet_id);
+    StatusOr<TabletSharedPtr> _load_tablet(TTabletId tablet_id, string func, int line);
     Status _create_tablet_meta_unlocked(const TCreateTabletReq& request, DataDir* store, bool is_schema_change_tablet,
                                         const Tablet* base_tablet, TabletMetaSharedPtr* tablet_meta);
 

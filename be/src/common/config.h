@@ -544,7 +544,7 @@ CONF_mInt64(max_runnings_transactions_per_txn_map, "100");
 
 // The tablet map shard size, the value must be power of two.
 // this is a an enhancement for better performance to manage tablet.
-CONF_Int32(tablet_map_shard_size, "32");
+CONF_Int32(tablet_map_shard_size, "2");
 
 CONF_String(plugin_path, "${STARROCKS_HOME}/plugin");
 
@@ -700,6 +700,8 @@ CONF_Int64(send_rpc_runtime_filter_timeout_ms, "1000");
 // enable optimized implementation of schema change
 CONF_Bool(enable_schema_change_v2, "true");
 
+CONF_Int32(tablet_meta_cache_prune_interval, "60"); // second
+CONF_Int32(tablet_meta_cache_capacity, "3");        // tablet num
 } // namespace config
 
 } // namespace starrocks
