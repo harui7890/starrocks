@@ -32,8 +32,11 @@ add_library(Service
     http_service.cpp
     internal_service.cpp
     mem_hook.cpp
-    staros_worker.cpp
 )
+
+if ("${USE_STAROS}" STREQUAL "ON")
+    list(APPEND EXEC_FILES staros_worker.cpp)
+endif()
 
 add_executable(starrocks_be
     starrocks_main.cpp

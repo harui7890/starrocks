@@ -182,7 +182,8 @@ else
     export LIBRARY_PATH=${JAVA_HOME}/jre/lib/amd64/server/
 fi
 
-
+# need config STAROS_DIR in custom.sh if USE_STAROS
+export STAROS_DIR="/home/disk1/hanrui/dev/staros"
 # Clean and build Backend
 if [ ${BUILD_BE} -eq 1 ] ; then
     CMAKE_BUILD_TYPE=${BUILD_TYPE:-Release}
@@ -207,8 +208,18 @@ if [ ${BUILD_BE} -eq 1 ] ; then
                     -DCMAKE_EXPORT_COMPILE_COMMANDS=ON ..
     time ${BUILD_SYSTEM} -j${PARALLEL}
     ${BUILD_SYSTEM} install
-    ${CMAKE_CMD} .. -DSTARROCKS_THIRDPARTY=${STARROCKS_THIRDPARTY} -DSTARROCKS_HOME=${STARROCKS_HOME} -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE} \
-                    -DMAKE_TEST=OFF -DWITH_GCOV=${WITH_GCOV} -DUSE_AVX2=$USE_AVX2 -DUSE_SSE4_2=$USE_SSE4_2 -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DUSE_STAROS=${USE_STAROS}
+    if [ ${USE_STAROS} == "on"  ]; then
+      ${CMAKE_CMD} .. -DSTARROCKS_THIRDPARTY=${STARROCKS_THIRDPARTY} -DSTARROCKS_HOME=${STARROCKS_HOME} -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE} \
+                    -DMAKE_TEST=OFF -DWITH_GCOV=${WITH_GCOV} -DUSE_AVX2=$USE_AVX2 -DUSE_SSE4_2=$USE_SSE4_2 -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DUSE_STAROS=${USE_STAROS} \
+                    -Dprotobuf_DIR=${STAROS_DIR}/starlet/third_party/grpc_install/lib64/cmake/protobuf \
+                    -Dabsl_DIR=${STAROS_DIR}/starlet/third_party/grpc_install/lib64/cmake/absl \
+                    -DgRPC_DIR=${STAROS_DIR}/starlet/third_party/grpc_install/lib/cmake/grpc \
+                    -Dstarlet_DIR=${STAROS_DIR}/starlet/starlet_install/lib64/cmake
+    else
+      ${CMAKE_CMD} .. -DSTARROCKS_THIRDPARTY=${STARROCKS_THIRDPARTY} -DSTARROCKS_HOME=${STARROCKS_HOME} -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE} \
+                    -DMAKE_TEST=OFF -DWITH_GCOV=${WITH_GCOV} -DUSE_AVX2=$USE_AVX2 -DUSE_SSE4_2=$USE_SSE4_2 -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+    fi
+
     time make -j${PARALLEL}
     make install
 

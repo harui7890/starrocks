@@ -17,8 +17,6 @@
 
 cmake_minimum_required(VERSION 3.5.1)
 
-cmake_policy(SET CMP0074 NEW)
-
 # set CMAKE_C_COMPILER, this must set before project command
 if (DEFINED ENV{CC} AND DEFINED ENV{CXX})
     set(CMAKE_C_COMPILER "$ENV{CC}")
@@ -151,7 +149,7 @@ add_library(glog STATIC IMPORTED)
 set_target_properties(glog PROPERTIES IMPORTED_LOCATION ${THIRDPARTY_DIR}/lib/libglog.a)
 
 add_library(re2 STATIC IMPORTED)
-set_target_properties(re2 PROPERTIES IMPORTED_LOCATION ${THIRDPARTY_DIR}/lib/libre2.a)
+set_target_properties(re2 PROPERTIES IMPORTED_LOCATION ${THIRDPARTY_DIR}/lib64/libre2.a)
 
 add_library(pprof STATIC IMPORTED)
 set_target_properties(pprof PROPERTIES IMPORTED_LOCATION
@@ -309,29 +307,30 @@ add_library(opentelemetry_exporter_jaeger_trace STATIC IMPORTED GLOBAL)
 set_target_properties(opentelemetry_exporter_jaeger_trace PROPERTIES IMPORTED_LOCATION ${THIRDPARTY_DIR}/lib64/libopentelemetry_exporter_jaeger_trace.a)
 
 if ("${USE_STAROS}" STREQUAL "ON")
-    set(Protobuf_ROOT $ENV{MY_INSTALL_DIR})
-    set(absl_ROOT $ENV{MY_INSTALL_DIR})
-    set(OPENSSL_ROOT_DIR $ENV{STARROCKS_THIRD_PARTY})
-    set(gRPC_ROOT $ENV{MY_INSTALL_DIR})
+     find_package(protobuf CONFIG REQUIRED)
+     message(STATUS "Using protobuf ${protobuf_VERSION}")
+     message(STATUS "protobuf include path: ${protobuf_INCLUDE_DIRS}")
+     message(STATUS "protobuf libs: ${protobuf_LIBS}")
 
-    find_package(OpenSSL REQUIRED)
+     find_package(gRPC CONFIG REQUIRED)
+     message(STATUS "Using gRPC ${gRPC_VERSION}")
+     get_target_property(gRPC_INCLUDE_DIR gRPC::grpc INTERFACE_INCLUDE_DIRECTORIES)
+     include_directories(${gRPC_INCLUDE_DIR})
 
-    find_package(Protobuf CONFIG REQUIRED)
-    message(STATUS "Using Protobuf ${Protobuf_VERSION}")
-    include_directories(${Protobuf_INCLUDE_DIRS})
+     find_package(starlet CONFIG REQUIRED)
+     message(STATUS "Using starlet ${starlet_VERSION}")
+     message(STATUS "starlet inc dir: ${STARLET_INCLUDE_DIRS}")
+     message(STATUS "starlet lib dir: ${STARLET_LIBS}")
+     include_directories(${STARLET_INCLUDE_DIRS})
+     add_library(starlet STATIC IMPORTED)
+     set_target_properties(starlet PROPERTIES IMPORTED_LOCATION ${STARLET_LIBS}/libstarlet.a)
 
-    find_package(gRPC CONFIG REQUIRED)
-    message(STATUS "Using gRPC ${gRPC_VERSION}")
-    include_directories(${gRPC_INCLUDE_DIRS})
-
-    add_library(starlet STATIC IMPORTED)
-    set_target_properties(starlet PROPERTIES IMPORTED_LOCATION $ENV{MY_INSTALL_DIR}/lib64/libstarlet.a)
-    set(STARROCKS_DEPENDENCIES
+     set(STARROCKS_DEPENDENCIES
         ${STARROCKS_DEPENDENCIES}
         starlet
         gRPC::grpc++_reflection
         gRPC::grpc++
-    )
+        )
 endif()
 
 set(AWSSDK_COMMON_RUNTIME_LIBS "aws-crt-cpp;aws-c-auth;aws-c-cal;aws-c-common;aws-c-compression;aws-c-event-stream;aws-c-http;aws-c-io;aws-c-mqtt;aws-c-s3;aws-checksums;s2n")
