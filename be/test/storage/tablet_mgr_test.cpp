@@ -23,6 +23,7 @@
 
 #include "fs/fs_util.h"
 #include "gtest/gtest.h"
+#include "service/staros_worker.h"
 #include "storage/kv_store.h"
 #include "storage/storage_engine.h"
 #include "storage/tablet_meta_manager.h"
@@ -72,6 +73,7 @@ public:
         _tablet_data_path = tmp_data_path + "/" + std::to_string(0) + "/" + std::to_string(_tablet_id) + "/" +
                             std::to_string(_schema_hash);
         _tablet_mgr.reset(new TabletManager(_mem_tracker.get(), 1));
+        init_staros_worker();
     }
 
     virtual void TearDown() {
@@ -79,6 +81,7 @@ public:
         if (std::filesystem::exists(_engine_data_path)) {
             ASSERT_TRUE(std::filesystem::remove_all(_engine_data_path));
         }
+        shutdown_staros_worker();
     }
 
     TCreateTabletReq get_create_tablet_request(int64_t tablet_id, int schema_hash) {
@@ -136,6 +139,38 @@ TEST_F(TabletMgrTest, CreateTablet) {
 
     // create tablet with different schema hash should return ok
     create_tablet_req = get_create_tablet_request(111, 4444);
+    create_st = _tablet_mgr->create_tablet(create_tablet_req, data_dirs);
+    ASSERT_TRUE(create_st.ok());
+}
+
+TEST_F(TabletMgrTest, CreateTabletS3) {
+    TCreateTabletReq create_tablet_req = get_create_tablet_request(222, 3333);
+    StarOSWorker::ShardInfo shard;
+    shard.id = 222;
+    shard.obj_store_info.uri = "s3://starlet-test.s3.oss-cn-hangzhou.aliyuncs.com/222";
+    g_worker->add_shard(shard);
+    create_tablet_req.__set_tablet_type(TTabletType::TABLET_TYPE_REMOTE);
+
+    std::vector<DataDir*> data_dirs;
+    data_dirs.push_back(_data_dir);
+    Status create_st = _tablet_mgr->create_tablet(create_tablet_req, data_dirs);
+    ASSERT_TRUE(create_st.ok());
+    TabletSharedPtr tablet = _tablet_mgr->get_tablet(222);
+    ASSERT_TRUE(tablet != nullptr);
+    // check dir exist
+    bool dir_exist = FileUtils::check_exist(tablet->schema_hash_path());
+    ASSERT_TRUE(dir_exist);
+    // check meta has this tablet
+    TabletMetaSharedPtr new_tablet_meta(new TabletMeta());
+    Status check_meta_st = TabletMetaManager::get_tablet_meta(_data_dir, 222, 3333, new_tablet_meta.get());
+    ASSERT_TRUE(check_meta_st.ok());
+
+    // retry create should be successfully
+    create_st = _tablet_mgr->create_tablet(create_tablet_req, data_dirs);
+    ASSERT_TRUE(create_st.ok());
+
+    // create tablet with different schema hash should return ok
+    create_tablet_req = get_create_tablet_request(222, 4444);
     create_st = _tablet_mgr->create_tablet(create_tablet_req, data_dirs);
     ASSERT_TRUE(create_st.ok());
 }

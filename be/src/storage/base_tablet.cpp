@@ -30,8 +30,7 @@
 namespace starrocks {
 
 BaseTablet::BaseTablet(const TabletMetaSharedPtr& tablet_meta, DataDir* data_dir)
-        : _state(tablet_meta->tablet_state()), _tablet_meta(tablet_meta), _data_dir(data_dir) {
-}
+        : _state(tablet_meta->tablet_state()), _tablet_meta(tablet_meta), _data_dir(data_dir) {}
 
 Status BaseTablet::set_tablet_state(TabletState state) {
     if (_tablet_meta->tablet_state() == TABLET_SHUTDOWN && state != TABLET_SHUTDOWN) {
@@ -50,57 +49,50 @@ std::string BaseTablet::schema_hash_path() const {
     if (_tablet_meta == nullptr) {
         return "";
     }
-#ifdef USE_STAROS
-    auto shard_info = get_shard_info(_tablet_meta->tablet_id());
-    if (!shard_info.ok()) {
-        LOG(WARNING) << "Fail to get shard#" << _tablet_meta->tablet_id();
-        return "";
+    if (_tablet_meta->tablet_type() == TabletTypePB::TABLET_TYPE_REMOTE) {
+        auto shard_info = get_shard_info(_tablet_meta->tablet_id());
+        if (!shard_info.ok()) {
+            LOG(WARNING) << "Fail to get shard#" << _tablet_meta->tablet_id();
+            return "";
+        }
+        if (shard_info->obj_store_info.uri.empty()) {
+            return "";
+        }
+        if (shard_info->obj_store_info.uri.back() != '/') {
+            return fmt::format("{}{}/{}/{}", "staros://", shard_info->obj_store_info.uri, _tablet_meta->tablet_id(),
+                               _tablet_meta->schema_hash());
+        } else {
+            return fmt::format("{}{}{}/{}", "staros://", shard_info->obj_store_info.uri, _tablet_meta->tablet_id(),
+                               _tablet_meta->schema_hash());
+        }
     }
-    if (shard_info->obj_store_info.uri.empty()) {
-        return "";
-    }
-    if (shard_info->obj_store_info.uri.back() != '/') {
-        return fmt::format("{}/{}/{}", shard_info->obj_store_info.uri, _tablet_meta->tablet_id(), _tablet_meta->schema_hash());
-    } else {
-        return fmt::format("{}{}/{}", shard_info->obj_store_info.uri, _tablet_meta->tablet_id(), _tablet_meta->schema_hash());
-    }
-#else
     if (_data_dir == nullptr) return "";
-    return fmt::format("{}{}/{}/{}/{}",
-           _data_dir->path(),
-           DATA_PREFIX,
-           _tablet_meta->shard_id(),
-          _tablet_meta->tablet_id(),
-          _tablet_meta->schema_hash());
-#endif
+    return fmt::format("{}{}/{}/{}/{}", _data_dir->path(), DATA_PREFIX, _tablet_meta->shard_id(),
+                       _tablet_meta->tablet_id(), _tablet_meta->schema_hash());
 }
 
 std::string BaseTablet::tablet_id_path() const {
     if (_tablet_meta == nullptr) {
         return "";
     }
-#ifdef USE_STAROS
-    auto shard_info = get_shard_info(_tablet_meta->staros_shard_id());
-    if (!shard_info.ok()) {
-        LOG(WARNING) << "Fail to get shard#" << _tablet_meta->staros_shard_id();
-        return "";
+    if (_tablet_meta->tablet_type() == TabletTypePB::TABLET_TYPE_REMOTE) {
+        auto shard_info = get_shard_info(_tablet_meta->tablet_id());
+        if (!shard_info.ok()) {
+            LOG(WARNING) << "Fail to get shard#" << _tablet_meta->tablet_id();
+            return "";
+        }
+        if (shard_info->obj_store_info.uri.empty()) {
+            return "";
+        }
+        if (shard_info->obj_store_info.uri.back() != '/') {
+            return fmt::format("{}{}/{}", "staros://", shard_info->obj_store_info.uri, _tablet_meta->tablet_id());
+        } else {
+            return fmt::format("{}{}{}", "staros://", shard_info->obj_store_info.uri, _tablet_meta->tablet_id());
+        }
     }
-    if (shard_info->obj_store_info.uri.empty()) {
-        return "";
-    }
-    if (shard_info->obj_store_info.uri.back() != '/') {
-        return fmt::format("{}/{}", shard_info->obj_store_info.uri, _tablet_meta->tablet_id());
-    } else {
-        return fmt::format("{}{}", shard_info->obj_store_info.uri, _tablet_meta->tablet_id());
-    }
-#else
     if (_data_dir == nullptr) return "";
-    return fmt::format("{}{}/{}/{}",
-           _data_dir->path(),
-           DATA_PREFIX,
-           _tablet_meta->shard_id(),
-          _tablet_meta->tablet_id());
-#endif
+    return fmt::format("{}{}/{}/{}", _data_dir->path(), DATA_PREFIX, _tablet_meta->shard_id(),
+                       _tablet_meta->tablet_id());
 }
 
 } /* namespace starrocks */

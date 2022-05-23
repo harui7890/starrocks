@@ -37,6 +37,7 @@ Usage: $0 <options>
      --gtest_filter                 specify test cases
      --with-aws                     enable to test aws
      --with-bench                   enable to build with benchmark
+     --use-staros                   enable to build with staros
      -j                             build parallel
 
   Eg.
@@ -58,6 +59,7 @@ OPTS=$(getopt \
   -l "gtest_filter:" \
   -l 'with-aws' \
   -l 'with-bench' \
+  -l 'use-staros' \
   -o 'j:' \
   -l 'help' \
   -- "$@")
@@ -74,6 +76,7 @@ TEST_FILTER=*
 HELP=0
 WITH_AWS=OFF
 WITH_BENCH=OFF
+USE_STAROS=OFF
 while true; do
     case "$1" in
         --clean) CLEAN=1 ; shift ;;
@@ -82,6 +85,7 @@ while true; do
         --help) HELP=1 ; shift ;; 
         --with-aws) WITH_AWS=ON; shift ;;
         --with-bench) WITH_BENCH=ON; shift ;;
+        --use-staros) USE_STAROS=ON; shift ;;
         -j) PARALLEL=$2; shift 2 ;;
         --) shift ;  break ;;
         *) echo "Internal error" ; exit 1 ;;
@@ -122,6 +126,16 @@ ${CMAKE_CMD}  -G "${CMAKE_GENERATOR}" \
               -DUSE_AVX2=$USE_AVX2 -DUSE_SSE4_2=$USE_SSE4_2 \
               -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DWITH_BENCH=${WITH_BENCH} ../
 time ${BUILD_SYSTEM} -j${PARALLEL}
+
+${CMAKE_CMD} ../ -DSTARROCKS_THIRDPARTY=${STARROCKS_THIRDPARTY} -DSTARROCKS_HOME=${STARROCKS_HOME} -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+    -DMAKE_TEST=ON -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE} -DUSE_AVX2=$USE_AVX2 -DUSE_SSE4_2=$USE_SSE4_2 \
+    -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DWITH_BENCH=${WITH_BENCH}  -DUSE_STAROS=${USE_STAROS} \
+    -Dprotobuf_DIR=/home/disk1/hanrui/dev/staros/starlet/third_party/grpc_install/lib64/cmake/protobuf \
+    -Dabsl_DIR=/home/disk1/hanrui/dev/staros/starlet/third_party/grpc_install/lib64/cmake/absl \
+    -DgRPC_DIR=/home/disk1/hanrui/dev/staros/starlet/third_party/grpc_install/lib/cmake/grpc \
+    -Dstarlet_DIR=/home/disk1/hanrui/dev/staros/starlet/starlet_install/lib64/cmake
+
+time make -j${PARALLEL}
 
 if [ ${RUN} -ne 1 ]; then
     echo "Finished"
@@ -202,6 +216,8 @@ cp -r ${STARROCKS_HOME}/be/test/plugin/plugin_test ${STARROCKS_TEST_BINARY_DIR}/
 
 test_files=`find ${STARROCKS_TEST_BINARY_DIR} -type f -perm -111 -name "*test" | grep -v starrocks_test | grep -v bench_test`
 
+echo "    ${STARROCKS_TEST_BINARY_DIR}/starrocks_test --gtest_filter=${TEST_FILTER}"
+/home/disk1/sr-deps/toolchain/installed/gdb-10.2/bin/gdb ${STARROCKS_TEST_BINARY_DIR}/starrocks_test
 # run cases in starrocks_test in parallel if has gtest-parallel script.
 # reference: https://github.com/google/gtest-parallel
 if [ -x ${GTEST_PARALLEL} ]; then

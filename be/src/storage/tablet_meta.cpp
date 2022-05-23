@@ -230,13 +230,17 @@ Status TabletMeta::create(MemTracker* mem_tracker, const TCreateTabletReq& reque
                           uint64_t shard_id, uint32_t next_unique_id,
                           const std::unordered_map<uint32_t, uint32_t>& col_ordinal_to_unique_id,
                           RowsetTypePB rowset_type, TabletMetaSharedPtr* tablet_meta) {
+    auto tablet_type = TTabletType::TABLET_TYPE_DISK;
+    if (request.__isset.tablet_type) {
+        tablet_type = request.tablet_type;
+    } else if (request.storage_medium == TStorageMedium::S3) {
+        tablet_type = TTabletType::TABLET_TYPE_REMOTE;
+    }
     *tablet_meta = std::shared_ptr<TabletMeta>(
             new TabletMeta(request.table_id, request.partition_id, request.tablet_id, request.tablet_schema.schema_hash,
                            shard_id, request.tablet_schema, next_unique_id,
                            request.__isset.enable_persistent_index ? request.enable_persistent_index : false,
-                           col_ordinal_to_unique_id, tablet_uid,
-                           request.__isset.tablet_type ? request.tablet_type : TTabletType::TABLET_TYPE_DISK,
-                           rowset_type),
+                           col_ordinal_to_unique_id, tablet_uid, tablet_type, rowset_type),
             DeleterWithMemTracker<TabletMeta>(mem_tracker));
     mem_tracker->consume((*tablet_meta)->mem_usage());
     return Status::OK();
@@ -265,8 +269,18 @@ TabletMeta::TabletMeta(int64_t table_id, int64_t partition_id, int64_t tablet_id
     tablet_meta_pb.set_tablet_state(PB_RUNNING);
     tablet_meta_pb.set_enable_persistent_index(enable_persistent_index);
     *(tablet_meta_pb.mutable_tablet_uid()) = tablet_uid.to_proto();
-    tablet_meta_pb.set_tablet_type(tabletType == TTabletType::TABLET_TYPE_MEMORY ? TabletTypePB::TABLET_TYPE_MEMORY
-                                                                                 : TabletTypePB::TABLET_TYPE_DISK);
+    switch (tabletType) {
+    case TTabletType::TABLET_TYPE_MEMORY:
+        tablet_meta_pb.set_tablet_type(TabletTypePB::TABLET_TYPE_MEMORY);
+        break;
+    case TTabletType::TABLET_TYPE_DISK:
+        tablet_meta_pb.set_tablet_type(TabletTypePB::TABLET_TYPE_DISK);
+        break;
+    case TTabletType::TABLET_TYPE_REMOTE:
+        tablet_meta_pb.set_tablet_type(TabletTypePB::TABLET_TYPE_REMOTE);
+        break;
+    }
+
     TabletSchemaPB* schema = tablet_meta_pb.mutable_schema();
     if (tablet_schema.__isset.id) {
         schema->set_id(tablet_schema.id);
